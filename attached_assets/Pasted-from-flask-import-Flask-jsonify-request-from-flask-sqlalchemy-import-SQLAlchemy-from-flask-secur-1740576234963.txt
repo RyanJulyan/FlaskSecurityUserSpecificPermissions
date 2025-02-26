@@ -1,0 +1,103 @@
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_security import Security, SQLAlchemyUserDatastore, UserMixin, RoleMixin, auth_required, permissions_required
+from werkzeug.security import generate_password_hash
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///test.db"
+app.config["SECRET_KEY"] = "supersecretkey"
+app.config["SECURITY_PASSWORD_SALT"] = "somesalt"
+app.config["SECURITY_REGISTERABLE"] = True
+app.config["SECURITY_TRACKABLE"] = True
+app.config["SECURITY_PASSWORD_HASH"] = "bcrypt"
+
+# Initialize database
+db = SQLAlchemy(app)
+
+# Define User-Role association table
+roles_users = db.Table(
+    "roles_users",
+    db.Column("user_id", db.Integer(), db.ForeignKey("user.id")),
+    db.Column("role_id", db.Integer(), db.ForeignKey("role.id")),
+)
+
+# Role model
+class Role(db.Model, RoleMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True)
+    permissions = db.Column(db.Text)  # Store as a comma-separated string (e.g., "admin,read")
+
+# User model with direct permissions support
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    active = db.Column(db.Boolean(), default=True)
+    fs_uniquifier = db.Column(db.String(64), unique=True, nullable=False)
+    roles = db.relationship("Role", secondary=roles_users, backref=db.backref("users", lazy="dynamic"))
+    
+    # Directly assigned user permissions
+    permissions = db.Column(db.Text, default="")  # Store as "read,write,delete"
+
+    def has_permission(self, permission):
+        """Check if user has a specific permission (direct or through roles)."""
+        user_permissions = set(self.permissions.split(",")) if self.permissions else set()
+        role_permissions = set()
+        
+        for role in self.roles:
+            if role.permissions:
+                role_permissions.update(role.permissions.split(","))
+
+        # Merge user and role permissions
+        all_permissions = user_permissions.union(role_permissions)
+        return permission in all_permissions
+
+# Set up Flask-Security
+user_datastore = SQLAlchemyUserDatastore(db, User, Role)
+security = Security(app, user_datastore)
+
+# Create database and test users
+@app.before_first_request
+def create_users():
+    db.create_all()
+
+    # Create roles
+    admin_role = user_datastore.find_or_create_role(name="admin", permissions="admin,read,write")
+    user_role = user_datastore.find_or_create_role(name="user", permissions="read")
+
+    # Create an admin user with a role
+    if not user_datastore.find_user(email="admin@example.com"):
+        user_datastore.create_user(
+            email="admin@example.com",
+            password=generate_password_hash("password"),
+            roles=[admin_role]
+        )
+
+    # Create a user with direct permissions instead of a role
+    if not user_datastore.find_user(email="direct@example.com"):
+        direct_user = user_datastore.create_user(
+            email="direct@example.com",
+            password=generate_password_hash("password"),
+            permissions="admin,read"
+        )
+
+    db.session.commit()
+
+# Protected route using permissions_required (works for roles & direct permissions)
+@app.route("/admin")
+@auth_required("session")
+@permissions_required("admin")
+def admin_dashboard():
+    return jsonify({"message": "You have admin access!"})
+
+# Protected route for users with "read" permission
+@app.route("/data")
+@auth_required("session")
+@permissions_required("read")
+def view_data():
+    return jsonify({"message": "You have read access!"})
+
+# Run the app
+if __name__ == "__main__":
+    app.run(debug=True)
