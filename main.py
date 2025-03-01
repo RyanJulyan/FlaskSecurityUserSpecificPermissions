@@ -204,7 +204,7 @@ def create_and_seed_db():
     if not admin_user:
         admin_user = user_datastore.create_user(
             email="admin@example.com",
-            password=generate_password_hash("password"),
+            password="password",
             roles=[admin_role],  # has the "admin" role
         )
         db.session.add(admin_user)
@@ -213,7 +213,7 @@ def create_and_seed_db():
     if not direct_user:
         direct_user = user_datastore.create_user(
             email="direct@example.com",
-            password=generate_password_hash("password"),
+            password="password",
             roles=[user_role],  # has "read" from the "user" role
         )
         db.session.add(direct_user)
@@ -229,7 +229,6 @@ def create_and_seed_db():
 
 
 # --- Routes ---
-
 
 # Initialize the database during startup instead of on first request
 with app.app_context():
