@@ -231,11 +231,9 @@ def create_and_seed_db():
 # --- Routes ---
 
 
-@app.before_request
-def initialize_once():
-    # Create tables & seed data once before the dev server runs
-    with app.app_context():
-        create_and_seed_db()
+# Initialize the database during startup instead of on first request
+with app.app_context():
+    create_and_seed_db()
 
 
 @app.route("/admin")
