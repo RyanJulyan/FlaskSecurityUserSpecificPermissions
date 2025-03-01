@@ -79,7 +79,10 @@ class Permission(db.Model):
     name = db.Column(db.String(80), unique=True, nullable=False)
 
     def __repr__(self):
-        return f"<Permission {self.name}>"
+        return f"{self.name}"
+
+    def __str__(self):
+        return f"{self.name}"
 
 
 class Role(db.Model, fsqla.FsRoleMixin):
@@ -119,17 +122,17 @@ class User(db.Model, fsqla.FsUserMixin):
         # Check if permission_names is a string or list
         if isinstance(permission_names, str):
             permission_names = [permission_names]
-            
+
         # Ensure all required permissions are present
         for permission_name in permission_names:
             has_this_permission = False
-            
+
             # Check direct user permissions
             for p in self.permissions:
                 if p.name == permission_name:
                     has_this_permission = True
                     break
-                    
+
             # If not found in direct permissions, check role permissions
             if not has_this_permission:
                 for role in self.roles:
@@ -139,11 +142,11 @@ class User(db.Model, fsqla.FsUserMixin):
                             break
                     if has_this_permission:
                         break
-                        
+
             # If this permission is not found anywhere, return False
             if not has_this_permission:
                 return False
-                
+
         # All permissions were found
         return True
 
@@ -269,26 +272,27 @@ def admin_dashboard():
     # Get the current user for debugging
     from flask_security import current_user
     from flask import request
-    
+
     # Print request information
     print(f"Request headers: {dict(request.headers)}")
-    
+
     # Check permission directly
     print(f"User: {current_user.email}")
-    print(f"User has admin permission? {current_user.has_permissions('admin')}")
-    
+    print(
+        f"User has admin permission? {current_user.has_permissions('admin')}")
+
     # Examine roles and permissions in detail
     roles = [role.name for role in current_user.roles]
     print(f"User roles: {roles}")
-    
+
     all_perms = []
     for role in current_user.roles:
         role_perms = [p.name for p in role.permissions]
         print(f"Role {role.name} permissions: {role_perms}")
         all_perms.extend(role_perms)
-    
+
     print(f"All permissions via roles: {all_perms}")
-    
+
     # If permission check passes, return success
     if current_user.has_permissions('admin'):
         return jsonify({
