@@ -1,7 +1,6 @@
 import os
 
 from flask import Flask, jsonify
-from werkzeug.security import generate_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from flask_mail import Mail
 from flask_security import (
@@ -207,25 +206,25 @@ def create_and_seed_db():
     if not admin_user:
         admin_user = user_datastore.create_user(
             email="admin@example.com",
-            password=generate_password_hash("password"),
+            password="password",
             roles=[admin_role],  # has the "admin" role
         )
         db.session.add(admin_user)
     else:
         # Update password for existing admin user
-        admin_user.password = generate_password_hash("password")
+        admin_user.password = "password"
 
     direct_user = user_datastore.find_user(email="direct@example.com")
     if not direct_user:
         direct_user = user_datastore.create_user(
             email="direct@example.com",
-            password=generate_password_hash("password"),
+            password="password",
             roles=[user_role],  # has "read" from the "user" role
         )
         db.session.add(direct_user)
     else:
         # Update password for existing direct user
-        direct_user.password = generate_password_hash("password")
+        direct_user.password = "password"
 
     db.session.commit()
 
