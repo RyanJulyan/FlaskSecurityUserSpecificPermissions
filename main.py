@@ -22,7 +22,7 @@ app.config["SECRET_KEY"] = "supersecretkey"
 app.config["SECURITY_PASSWORD_SALT"] = "somesalt"
 app.config["SECURITY_REGISTERABLE"] = True
 app.config["SECURITY_TRACKABLE"] = True
-app.config["SECURITY_PASSWORD_HASH"] = "bcrypt"
+app.config["SECURITY_PASSWORD_HASH"] = "werkzeug"
 
 # Mail Configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
@@ -149,6 +149,9 @@ def create_and_seed_db():
     print("*" * 20)
     print()
     db.create_all()
+    
+    # Verify if hashing is properly configured
+    print("Using password hash:", app.config["SECURITY_PASSWORD_HASH"])
 
     #
     # 1) Create permissions if not present
@@ -204,19 +207,25 @@ def create_and_seed_db():
     if not admin_user:
         admin_user = user_datastore.create_user(
             email="admin@example.com",
-            password="password",
+            password=generate_password_hash("password"),
             roles=[admin_role],  # has the "admin" role
         )
         db.session.add(admin_user)
+    else:
+        # Update password for existing admin user
+        admin_user.password = generate_password_hash("password")
 
     direct_user = user_datastore.find_user(email="direct@example.com")
     if not direct_user:
         direct_user = user_datastore.create_user(
             email="direct@example.com",
-            password="password",
+            password=generate_password_hash("password"),
             roles=[user_role],  # has "read" from the "user" role
         )
         db.session.add(direct_user)
+    else:
+        # Update password for existing direct user
+        direct_user.password = generate_password_hash("password")
 
     db.session.commit()
 
