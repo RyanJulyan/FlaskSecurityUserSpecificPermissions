@@ -74,10 +74,6 @@ users_permissions = db.Table(
 # --- Models ---
 
 
-class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
-    pass
-
-
 class Permission(db.Model):
     """A separate table to store permission names."""
     id = db.Column(db.Integer, primary_key=True)
@@ -134,6 +130,10 @@ class User(db.Model, fsqla.FsUserMixin):
 
     def __repr__(self):
         return f"<User {self.email}>"
+
+
+class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
+    pass
 
 
 # --- Setup Flask-Security ---
