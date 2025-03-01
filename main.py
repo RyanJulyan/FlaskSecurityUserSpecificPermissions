@@ -183,20 +183,8 @@ class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore, mail_util=mail)
 
-# Register a custom handler to properly add permissions to identity
-@security.identity_loaded.connect_via(app)
-def on_identity_loaded(sender, identity):
-    # Add the permissions from the user's get_security_payload
-    if hasattr(identity, 'user') and identity.user:
-        user = identity.user
-        # Add all permissions the user has
-        for permission in user.permissions:
-            identity.provides.add(('fsperm', permission.name))
-            
-        # Also add permissions from roles
-        for role in user.roles:
-            for permission in role.permissions:
-                identity.provides.add(('fsperm', permission.name))
+# No need for identity_loaded handler, the get_security_payload method in User class
+# already adds the permissions to the identity when a user logs in
 
 
 # --- DB creation and seeding (NO before_first_request) ---
