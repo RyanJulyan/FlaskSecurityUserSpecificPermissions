@@ -108,24 +108,44 @@ class User(db.Model, fsqla.FsUserMixin):
         backref=db.backref("users", lazy="dynamic"),
     )
 
-    def has_permission(self, permission_name: str) -> bool:
+    def has_permissions(self, permission_names):
         """
-        Override the check so `@permissions_required(name)` verifies:
+        Override the check so `@permissions_required(names)` verifies:
             1) Direct user permissions
             2) Permissions via any role
+        
+        This matches Flask-Security's expected method name and signature.
         """
-        # Check direct user permissions
-        for p in self.permissions:
-            if p.name == permission_name:
-                return True
-
-        # Check role-based permissions
-        for role in self.roles:
-            for rp in role.permissions:
-                if rp.name == permission_name:
-                    return True
-
-        return False
+        # Check if permission_names is a string or list
+        if isinstance(permission_names, str):
+            permission_names = [permission_names]
+            
+        # Ensure all required permissions are present
+        for permission_name in permission_names:
+            has_this_permission = False
+            
+            # Check direct user permissions
+            for p in self.permissions:
+                if p.name == permission_name:
+                    has_this_permission = True
+                    break
+                    
+            # If not found in direct permissions, check role permissions
+            if not has_this_permission:
+                for role in self.roles:
+                    for rp in role.permissions:
+                        if rp.name == permission_name:
+                            has_this_permission = True
+                            break
+                    if has_this_permission:
+                        break
+                        
+            # If this permission is not found anywhere, return False
+            if not has_this_permission:
+                return False
+                
+        # All permissions were found
+        return True
 
     def __repr__(self):
         return f"<User {self.email}>"
