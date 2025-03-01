@@ -22,7 +22,7 @@ app.config["SECRET_KEY"] = "supersecretkey"
 app.config["SECURITY_PASSWORD_SALT"] = "somesalt"
 app.config["SECURITY_REGISTERABLE"] = True
 app.config["SECURITY_TRACKABLE"] = True
-app.config["SECURITY_PASSWORD_HASH"] = "werkzeug"
+app.config["SECURITY_PASSWORD_HASH"] = "argon2"
 
 # Mail Configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
@@ -149,7 +149,7 @@ def create_and_seed_db():
     print("*" * 20)
     print()
     db.create_all()
-    
+
     # Verify if hashing is properly configured
     print("Using password hash:", app.config["SECURITY_PASSWORD_HASH"])
 
