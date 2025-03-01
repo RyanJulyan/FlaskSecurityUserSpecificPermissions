@@ -6,12 +6,14 @@ from flask_mail import Mail
 from flask_security import (
     Security,
     SQLAlchemyUserDatastore,
-    UserMixin,
-    RoleMixin,
     auth_required,
     permissions_required,
+    current_user,
 )
 from flask_security.models import fsqla_v3 as fsqla
+
+# NEW IMPORTS FOR IDENTITY
+from flask_principal import identity_loaded, RoleNeed, AnonymousIdentity, Need, identity_changed
 
 # --- Initialize Flask app ---
 app = Flask(__name__)
@@ -44,7 +46,6 @@ mail = Mail(app)
 # Initialize FsModels with our SQLAlchemy instance
 fsqla.FsModels.set_db_info(db)
 
-# Roles ↔ Permissions (many-to-many)
 roles_permissions = db.Table(
     "roles_permissions",
     db.Column("role_id",
@@ -57,7 +58,6 @@ roles_permissions = db.Table(
               primary_key=True),
 )
 
-# Users ↔ Permissions (many-to-many) for direct user permissions
 users_permissions = db.Table(
     "users_permissions",
     db.Column("user_id",
@@ -70,11 +70,10 @@ users_permissions = db.Table(
               primary_key=True),
 )
 
-# --- Models ---
 
-
-class Permission(db.Model):
+class PermissionModel(db.Model):
     """A separate table to store permission names."""
+    __tablename__ = "permission"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
 
@@ -90,9 +89,8 @@ class Role(db.Model, fsqla.FsRoleMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True)
 
-    # Many-to-many reference to Permission
     permissions = db.relationship(
-        "Permission",
+        "PermissionModel",
         secondary=roles_permissions,
         backref=db.backref("roles", lazy="dynamic"),
     )
@@ -103,10 +101,8 @@ class Role(db.Model, fsqla.FsRoleMixin):
 
 class User(db.Model, fsqla.FsUserMixin):
     """Flask-Security User model, extended to have direct Permissions."""
-
-    # Many-to-many reference to Permission (for direct user permissions)
     permissions = db.relationship(
-        "Permission",
+        "PermissionModel",
         secondary=users_permissions,
         backref=db.backref("users", lazy="dynamic"),
     )
@@ -116,17 +112,12 @@ class User(db.Model, fsqla.FsUserMixin):
         Override the check so `@permissions_required(names)` verifies:
             1) Direct user permissions
             2) Permissions via any role
-        
-        This matches Flask-Security's expected method name and signature.
         """
-        # Check if permission_names is a string or list
         if isinstance(permission_names, str):
             permission_names = [permission_names]
 
-        # Ensure all required permissions are present
         for permission_name in permission_names:
             has_this_permission = False
-
             # Check direct user permissions
             for p in self.permissions:
                 if p.name == permission_name:
@@ -143,31 +134,23 @@ class User(db.Model, fsqla.FsUserMixin):
                     if has_this_permission:
                         break
 
-            # If this permission is not found anywhere, return False
             if not has_this_permission:
                 return False
 
-        # All permissions were found
         return True
-        
-    # This method is needed for Flask-Principal integration
+
     def get_security_payload(self):
         """Return a dictionary of user information for Flask-Security."""
         rv = super().get_security_payload()
-        
-        # Add all permissions to the payload
-        # This ensures Flask-Principal will add them to identity.provides
         all_permissions = set()
-        
-        # Add direct user permissions
+
         for p in self.permissions:
             all_permissions.add(p.name)
-            
-        # Add permissions from roles
+
         for role in self.roles:
             for p in role.permissions:
                 all_permissions.add(p.name)
-                
+
         rv['permissions'] = list(all_permissions)
         return rv
 
@@ -183,40 +166,54 @@ class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore, mail_util=mail)
 
-# No need for identity_loaded handler, the get_security_payload method in User class
-# already adds the permissions to the identity when a user logs in
+
+# --- Identity Loaded Signal Handler ---
+@identity_loaded.connect_via(app)
+def on_identity_loaded(sender, identity):
+    """
+    Ensure that the identity object is updated with the
+    current user's roles and permissions *before* any checks.
+    """
+    if not current_user.is_authenticated:
+        identity_changed.send(app,
+                              identity=AnonymousIdentity())  # Reset identity
+        # identity.provides.update(None)
+        return
+
+    identity.user = current_user
+
+    # Add any 'role' Needs
+    for role in current_user.roles:
+        identity.provides.add(RoleNeed(role.name))
+
+    # Add direct user permissions as fsperm Needs
+    for perm in current_user.permissions:
+        identity.provides.add(Need('fsperm', perm.name))
+
+    # Add role-based permissions
+    for role in current_user.roles:
+        for rp in role.permissions:
+            identity.provides.add(Need('fsperm', rp.name))
 
 
-# --- DB creation and seeding (NO before_first_request) ---
 def create_and_seed_db():
-    print()
-    print("*" * 20)
-    print("Creating database tables...")
-    print("*" * 20)
-    print()
     db.create_all()
 
-    # Verify if hashing is properly configured
     print("Using password hash:", app.config["SECURITY_PASSWORD_HASH"])
 
-    #
-    # 1) Create permissions if not present
-    #
-    def get_or_create_permission(name: str) -> Permission:
-        perm = Permission.query.filter_by(name=name).first()
+    def get_or_create_permission(name: str) -> PermissionModel:
+        perm = PermissionModel.query.filter_by(name=name).first()
         if not perm:
-            perm = Permission(name=name)
+            perm = PermissionModel(name=name)
             db.session.add(perm)
-            db.session.commit()  # commit so 'perm.id' is available
+            db.session.commit()
         return perm
 
     admin_perm = get_or_create_permission("admin")
     read_perm = get_or_create_permission("read")
     write_perm = get_or_create_permission("write")
+    other_perm = get_or_create_permission("other")
 
-    #
-    # 2) Create roles if not present
-    #
     admin_role = user_datastore.find_role("admin")
     if not admin_role:
         admin_role = user_datastore.create_role(name="admin")
@@ -229,10 +226,7 @@ def create_and_seed_db():
 
     db.session.commit()
 
-    #
-    # 3) Assign permissions to roles if not already assigned
-    #
-    def add_perm_to_role(role: Role, perm: Permission):
+    def add_perm_to_role(role: Role, perm: PermissionModel):
         if perm not in role.permissions:
             role.permissions.append(perm)
 
@@ -246,19 +240,15 @@ def create_and_seed_db():
 
     db.session.commit()
 
-    #
-    # 4) Create users if not present
-    #
     admin_user = user_datastore.find_user(email="admin@example.com")
     if not admin_user:
         admin_user = user_datastore.create_user(
             email="admin@example.com",
             password="password",
-            roles=[admin_role],  # has the "admin" role
+            roles=[admin_role],
         )
         db.session.add(admin_user)
     else:
-        # Update password for existing admin user
         admin_user.password = "password"
 
     direct_user = user_datastore.find_user(email="direct@example.com")
@@ -266,46 +256,38 @@ def create_and_seed_db():
         direct_user = user_datastore.create_user(
             email="direct@example.com",
             password="password",
-            roles=[user_role],  # has "read" from the "user" role
+            roles=[user_role],
         )
         db.session.add(direct_user)
     else:
-        # Update password for existing direct user
         direct_user.password = "password"
 
     db.session.commit()
 
-    #
-    # 5) If the "direct" user exists, ensure they have the "admin" permission directly
-    #
-    if admin_perm not in direct_user.permissions:
-        direct_user.permissions.append(admin_perm)
+    # Give "direct" user the `other` permission directly
+    # at a user level, not through roll
+    if other_perm not in direct_user.permissions:
+        direct_user.permissions.append(other_perm)
         db.session.commit()
 
 
-# --- Routes ---
-
-# Initialize the database during startup instead of on first request
+# Initialize the database on startup
 with app.app_context():
     create_and_seed_db()
 
 
 @app.route("/admin")
 @auth_required("session")
+@permissions_required("admin")
 def admin_dashboard():
-    # Get the current user for debugging
     from flask_security import current_user
     from flask import request
 
-    # Print request information
     print(f"Request headers: {dict(request.headers)}")
-
-    # Check permission directly
     print(f"User: {current_user.email}")
     print(
         f"User has admin permission? {current_user.has_permissions('admin')}")
 
-    # Examine roles and permissions in detail
     roles = [role.name for role in current_user.roles]
     print(f"User roles: {roles}")
 
@@ -317,7 +299,6 @@ def admin_dashboard():
 
     print(f"All permissions via roles: {all_perms}")
 
-    # If permission check passes, return success
     if current_user.has_permissions('admin'):
         return jsonify({
             "message": "You have ADMIN access!",
@@ -328,7 +309,6 @@ def admin_dashboard():
             }
         })
     else:
-        # Return detailed error response
         return jsonify({
             "error": "Forbidden",
             "debug_info": {
@@ -354,7 +334,12 @@ def write_something():
     return jsonify({"message": "You have WRITE access!"})
 
 
-# --- Start the app: Create/Seed DB once, then run ---
-if __name__ == "__main__":
+@app.route("/other")
+@auth_required("session")
+@permissions_required("other")
+def other():
+    return jsonify({"message": "You have OTHER access!"})
 
+
+if __name__ == "__main__":
     app.run(debug=True)
