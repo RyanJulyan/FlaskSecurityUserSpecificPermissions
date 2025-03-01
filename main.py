@@ -1,7 +1,9 @@
 import os
 
 from flask import Flask, jsonify
+from werkzeug.security import generate_password_hash
 from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail
 from flask_security import (
     Security,
     SQLAlchemyUserDatastore,
@@ -10,7 +12,7 @@ from flask_security import (
     auth_required,
     permissions_required,
 )
-from werkzeug.security import generate_password_hash
+from flask_security.models import fsqla_v3 as fsqla
 
 # --- Initialize Flask app ---
 app = Flask(__name__)
@@ -35,17 +37,13 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER',
 db = SQLAlchemy(app)
 
 # Initialize Flask-Mail
-from flask_mail import Mail
 mail = Mail(app)
 
 # --- Association tables ---
 
-# Standard Flask-Security roles ↔ users
-roles_users = db.Table(
-    "roles_users",
-    db.Column("user_id", db.Integer(), db.ForeignKey("user.id")),
-    db.Column("role_id", db.Integer(), db.ForeignKey("role.id")),
-)
+# Define models and
+# Initialize FsModels with our SQLAlchemy instance
+fsqla.FsModels.set_db_info(db)
 
 # Roles ↔ Permissions (many-to-many)
 roles_permissions = db.Table(
@@ -76,6 +74,10 @@ users_permissions = db.Table(
 # --- Models ---
 
 
+class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
+    pass
+
+
 class Permission(db.Model):
     """A separate table to store permission names."""
     id = db.Column(db.Integer, primary_key=True)
@@ -85,7 +87,7 @@ class Permission(db.Model):
         return f"<Permission {self.name}>"
 
 
-class Role(db.Model, RoleMixin):
+class Role(db.Model, fsqla.FsRoleMixin):
     """Flask-Security Role model, extended to have many Permissions."""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True)
@@ -101,20 +103,8 @@ class Role(db.Model, RoleMixin):
         return f"<Role {self.name}>"
 
 
-class User(db.Model, UserMixin):
+class User(db.Model, fsqla.FsUserMixin):
     """Flask-Security User model, extended to have direct Permissions."""
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
-    active = db.Column(db.Boolean(), default=True)
-    fs_uniquifier = db.Column(db.String(64), unique=True, nullable=False)
-
-    # Many-to-many reference to Role (standard Flask-Security approach)
-    roles = db.relationship(
-        "Role",
-        secondary=roles_users,
-        backref=db.backref("users", lazy="dynamic"),
-    )
 
     # Many-to-many reference to Permission (for direct user permissions)
     permissions = db.relationship(
