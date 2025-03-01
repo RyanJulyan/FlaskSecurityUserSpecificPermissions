@@ -149,6 +149,27 @@ class User(db.Model, fsqla.FsUserMixin):
 
         # All permissions were found
         return True
+        
+    # This method is needed for Flask-Principal integration
+    def get_security_payload(self):
+        """Return a dictionary of user information for Flask-Security."""
+        rv = super().get_security_payload()
+        
+        # Add all permissions to the payload
+        # This ensures Flask-Principal will add them to identity.provides
+        all_permissions = set()
+        
+        # Add direct user permissions
+        for p in self.permissions:
+            all_permissions.add(p.name)
+            
+        # Add permissions from roles
+        for role in self.roles:
+            for p in role.permissions:
+                all_permissions.add(p.name)
+                
+        rv['permissions'] = list(all_permissions)
+        return rv
 
     def __repr__(self):
         return f"<User {self.email}>"
@@ -161,6 +182,21 @@ class WebAuthn(db.Model, fsqla.FsWebAuthnMixin):
 # --- Setup Flask-Security ---
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore, mail_util=mail)
+
+# Register a custom handler to properly add permissions to identity
+@security.identity_loaded.connect_via(app)
+def on_identity_loaded(sender, identity):
+    # Add the permissions from the user's get_security_payload
+    if hasattr(identity, 'user') and identity.user:
+        user = identity.user
+        # Add all permissions the user has
+        for permission in user.permissions:
+            identity.provides.add(('fsperm', permission.name))
+            
+        # Also add permissions from roles
+        for role in user.roles:
+            for permission in role.permissions:
+                identity.provides.add(('fsperm', permission.name))
 
 
 # --- DB creation and seeding (NO before_first_request) ---
