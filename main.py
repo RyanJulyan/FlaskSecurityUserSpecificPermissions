@@ -31,7 +31,12 @@ app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER',
                                                    app.config['MAIL_USERNAME'])
 
+# Initialize extensions
 db = SQLAlchemy(app)
+
+# Initialize Flask-Mail
+from flask_mail import Mail
+mail = Mail(app)
 
 # --- Association tables ---
 
@@ -143,7 +148,7 @@ class User(db.Model, UserMixin):
 
 # --- Setup Flask-Security ---
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
-Security(app, user_datastore)
+security = Security(app, user_datastore, mail_util=mail)
 
 
 # --- DB creation and seeding (NO before_first_request) ---
