@@ -265,9 +265,51 @@ with app.app_context():
 
 @app.route("/admin")
 @auth_required("session")
-@permissions_required("admin")
 def admin_dashboard():
-    return jsonify({"message": "You have ADMIN access!"})
+    # Get the current user for debugging
+    from flask_security import current_user
+    from flask import request
+    
+    # Print request information
+    print(f"Request headers: {dict(request.headers)}")
+    
+    # Check permission directly
+    print(f"User: {current_user.email}")
+    print(f"User has admin permission? {current_user.has_permissions('admin')}")
+    
+    # Examine roles and permissions in detail
+    roles = [role.name for role in current_user.roles]
+    print(f"User roles: {roles}")
+    
+    all_perms = []
+    for role in current_user.roles:
+        role_perms = [p.name for p in role.permissions]
+        print(f"Role {role.name} permissions: {role_perms}")
+        all_perms.extend(role_perms)
+    
+    print(f"All permissions via roles: {all_perms}")
+    
+    # If permission check passes, return success
+    if current_user.has_permissions('admin'):
+        return jsonify({
+            "message": "You have ADMIN access!",
+            "debug_info": {
+                "user": current_user.email,
+                "roles": roles,
+                "permissions": all_perms
+            }
+        })
+    else:
+        # Return detailed error response
+        return jsonify({
+            "error": "Forbidden",
+            "debug_info": {
+                "user": current_user.email,
+                "roles": roles,
+                "permissions": all_perms,
+                "has_admin_permission": current_user.has_permissions('admin')
+            }
+        }), 403
 
 
 @app.route("/read")
